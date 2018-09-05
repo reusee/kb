@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	KeyboardPath = "/dev/input/by-id/usb-CATEX_TECH._87EC-S_CA2015090001-event-kbd"
+	KeyboardPath = "/dev/input/by-id/usb-CATEX_TECH._84EC-S_CA2017090002-event-kbd"
 )
 
 var (
@@ -161,29 +161,28 @@ func main() {
 					if ev.code == code && ev.value == 1 && time.Since(t) < interval {
 						state = 3
 						t = time.Now()
+						return true // ignore shift press
 					} else {
 						state = 0
 					}
 				case 3:
 					if ev.code == code && ev.value == 0 && time.Since(t) < interval {
-						state = 4
+						state = 3
 						t = time.Now()
 					} else {
 						state = 0
-					}
-				case 4:
-					state = 0
-					if time.Since(t) < time.Second {
-						if _, err := syscall.Write(uinputFD, ctrlPress); err != nil {
-							panic(err)
+						if time.Since(t) < time.Second {
+							if _, err := syscall.Write(uinputFD, ctrlPress); err != nil {
+								panic(err)
+							}
+							if _, err := syscall.Write(uinputFD, raw); err != nil {
+								panic(err)
+							}
+							if _, err := syscall.Write(uinputFD, ctrlRelease); err != nil {
+								panic(err)
+							}
+							return true
 						}
-						if _, err := syscall.Write(uinputFD, raw); err != nil {
-							panic(err)
-						}
-						if _, err := syscall.Write(uinputFD, ctrlRelease); err != nil {
-							panic(err)
-						}
-						return true
 					}
 				}
 				return false
