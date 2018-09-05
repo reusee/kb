@@ -131,6 +131,16 @@ func main() {
 		ev._type = C.EV_KEY
 		ev.code = C.KEY_LEFTCTRL
 		ev.value = 0
+		metaPress := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
+		ev = (*C.struct_input_event)(unsafe.Pointer(&metaPress[0]))
+		ev._type = C.EV_KEY
+		ev.code = C.KEY_LEFTMETA
+		ev.value = 1
+		metaRelease := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
+		ev = (*C.struct_input_event)(unsafe.Pointer(&metaRelease[0]))
+		ev._type = C.EV_KEY
+		ev.code = C.KEY_LEFTMETA
+		ev.value = 0
 
 		type state func(ev *C.struct_input_event, raw []byte) bool
 
@@ -189,6 +199,51 @@ func main() {
 			}
 		}()
 
+		shiftToMeta := func() state {
+			state := 0
+			var t time.Time
+			var code C.ushort
+			return func(ev *C.struct_input_event, raw []byte) bool {
+				if ev._type != C.EV_KEY {
+					return false
+				}
+				if ev.value != 1 {
+					return false
+				}
+				switch state {
+				case 0:
+					if ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT {
+						state = 1
+						t = time.Now()
+						code = ev.code
+					}
+				case 1:
+					if time.Since(t) < interval && (ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT) && ev.code != code {
+						state = 2
+						t = time.Now()
+						return true // ignore this shift press
+					} else {
+						state = 0
+					}
+				case 2:
+					state = 0
+					if time.Since(t) < time.Second {
+						if _, err := syscall.Write(uinputFD, metaPress); err != nil {
+							panic(err)
+						}
+						if _, err := syscall.Write(uinputFD, raw); err != nil {
+							panic(err)
+						}
+						if _, err := syscall.Write(uinputFD, metaRelease); err != nil {
+							panic(err)
+						}
+						return true
+					}
+				}
+				return false
+			}
+		}()
+
 		raw := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
 		for {
 			if _, err := syscall.Read(keyboardFD, raw); err != nil {
@@ -197,6 +252,9 @@ func main() {
 			ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
 			pt("%+v\n", ev)
 			if doubleShiftToCtrl(ev, raw) {
+				continue
+			}
+			if shiftToMeta(ev, raw) {
 				continue
 			}
 			if _, err := syscall.Write(uinputFD, raw); err != nil {
