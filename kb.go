@@ -132,18 +132,16 @@ func main() {
 		ev.code = C.KEY_LEFTCTRL
 		ev.value = 0
 
-		buf := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
-		state := 0
-		var t time.Time
-		var code C.ushort
-	next_key:
-		for {
-			if _, err := syscall.Read(keyboardFD, buf); err != nil {
-				panic(err)
-			}
-			ev := (*C.struct_input_event)(unsafe.Pointer(&buf[0]))
-			pt("%+v\n", ev)
-			if ev._type == C.EV_KEY {
+		type state func(ev *C.struct_input_event, raw []byte) bool
+
+		doubleShiftToCtrl := func() state {
+			state := 0
+			var t time.Time
+			var code C.ushort
+			return func(ev *C.struct_input_event, raw []byte) bool {
+				if ev._type != C.EV_KEY {
+					return false
+				}
 				switch state {
 				case 0:
 					if ev.code == C.KEY_LEFTSHIFT && ev.value == 1 ||
@@ -167,22 +165,42 @@ func main() {
 						state = 0
 					}
 				case 3:
+					if ev.code == code && ev.value == 0 && time.Since(t) < interval {
+						state = 4
+						t = time.Now()
+					} else {
+						state = 0
+					}
+				case 4:
 					state = 0
 					if time.Since(t) < time.Second {
 						if _, err := syscall.Write(uinputFD, ctrlPress); err != nil {
 							panic(err)
 						}
-						if _, err := syscall.Write(uinputFD, buf); err != nil {
+						if _, err := syscall.Write(uinputFD, raw); err != nil {
 							panic(err)
 						}
 						if _, err := syscall.Write(uinputFD, ctrlRelease); err != nil {
 							panic(err)
 						}
-						continue next_key
+						return true
 					}
 				}
+				return false
 			}
-			if _, err := syscall.Write(uinputFD, buf); err != nil {
+		}()
+
+		raw := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
+		for {
+			if _, err := syscall.Read(keyboardFD, raw); err != nil {
+				panic(err)
+			}
+			ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
+			pt("%+v\n", ev)
+			if doubleShiftToCtrl(ev, raw) {
+				continue
+			}
+			if _, err := syscall.Write(uinputFD, raw); err != nil {
 				panic(err)
 			}
 		}
