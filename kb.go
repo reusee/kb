@@ -167,13 +167,6 @@ func main() {
 						state = 0
 					}
 				case 3:
-					if ev.code == code && ev.value == 0 && time.Since(t) < interval {
-						state = 4
-						t = time.Now()
-					} else {
-						state = 0
-					}
-				case 4:
 					state = 0
 					if time.Since(t) < time.Second {
 						if _, err := syscall.Write(uinputFD, ctrlPress); err != nil {
