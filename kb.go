@@ -157,7 +157,7 @@ func main() {
 
 		type stateFunc func(ev *C.struct_input_event, raw []byte) bool
 
-		doubleToModifier := func(key C.ushort, press, release []byte) stateFunc {
+		doubleShiftToCtrl := func() stateFunc {
 			state := 0
 			var t time.Time
 			var code C.ushort
@@ -170,7 +170,7 @@ func main() {
 				}
 				switch state {
 				case 0:
-					if ev.code == key {
+					if ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT {
 						state = 1
 						t = time.Now()
 						code = ev.code
@@ -186,19 +186,15 @@ func main() {
 				case 2:
 					state = 0
 					if time.Since(t) < interval {
-						writeEv(press)
+						writeEv(ctrlPress)
 						writeEv(raw)
-						writeEv(release)
+						writeEv(ctrlRelease)
 						return true
 					}
 				}
 				return false
 			}
-		}
-
-		doubleShiftToCtrlLeft := doubleToModifier(C.KEY_LEFTSHIFT, ctrlPress, ctrlRelease)
-		doubleShiftToCtrlRight := doubleToModifier(C.KEY_RIGHTSHIFT, ctrlPress, ctrlRelease)
-		doubleCapslockToMeta := doubleToModifier(C.KEY_CAPSLOCK, metaPress, metaRelease)
+		}()
 
 		shiftToMeta := func() stateFunc {
 			state := 0
@@ -247,9 +243,7 @@ func main() {
 			}
 			ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
 			for _, fn := range []stateFunc{
-				doubleShiftToCtrlLeft,
-				doubleShiftToCtrlRight,
-				doubleCapslockToMeta,
+				doubleShiftToCtrl,
 				shiftToMeta,
 			} {
 				if fn(ev, raw) {
