@@ -5,6 +5,7 @@ package main
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <stdio.h>
 
 unsigned long* get_mask(unsigned long fd) {
 	unsigned long *mask = malloc(
@@ -103,6 +104,12 @@ func main() {
 		)
 	}()
 
+	writeEv := func(raw []byte) {
+		if _, err := syscall.Write(uinputFD, raw); err != nil {
+			panic(err)
+		}
+	}
+
 	ctl(
 		keyboardFD,
 		C.EVIOCGRAB,
@@ -125,8 +132,6 @@ func main() {
 		metaRelease := rawEvent(C.EV_KEY, C.KEY_LEFTMETA, 0)
 
 		type stateFunc func(ev *C.struct_input_event, raw []byte) bool
-
-		//TODO repeatable ctrl + p/n
 
 		doubleShiftToCtrl := func() stateFunc {
 			state := 0
@@ -157,15 +162,9 @@ func main() {
 				case 2:
 					state = 0
 					if time.Since(t) < interval {
-						if _, err := syscall.Write(uinputFD, ctrlPress); err != nil {
-							panic(err)
-						}
-						if _, err := syscall.Write(uinputFD, raw); err != nil {
-							panic(err)
-						}
-						if _, err := syscall.Write(uinputFD, ctrlRelease); err != nil {
-							panic(err)
-						}
+						writeEv(ctrlPress)
+						writeEv(raw)
+						writeEv(ctrlRelease)
 						return true
 					}
 				}
@@ -202,15 +201,9 @@ func main() {
 				case 2:
 					state = 0
 					if time.Since(t) < interval {
-						if _, err := syscall.Write(uinputFD, metaPress); err != nil {
-							panic(err)
-						}
-						if _, err := syscall.Write(uinputFD, raw); err != nil {
-							panic(err)
-						}
-						if _, err := syscall.Write(uinputFD, metaRelease); err != nil {
-							panic(err)
-						}
+						writeEv(metaPress)
+						writeEv(raw)
+						writeEv(metaRelease)
 						return true
 					}
 				}
@@ -225,7 +218,6 @@ func main() {
 				panic(err)
 			}
 			ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
-			pt("%+v\n", ev)
 			for _, fn := range []stateFunc{
 				doubleShiftToCtrl,
 				shiftToMeta,
@@ -234,9 +226,7 @@ func main() {
 					continue next_key
 				}
 			}
-			if _, err := syscall.Write(uinputFD, raw); err != nil {
-				panic(err)
-			}
+			writeEv(raw)
 		}
 
 	}()
