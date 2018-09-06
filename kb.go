@@ -196,6 +196,44 @@ func main() {
 			}
 		}()
 
+		doubleCapslockToMeta := func() stateFunc {
+			state := 0
+			var t time.Time
+			var code C.ushort
+			return func(ev *C.struct_input_event, raw []byte) bool {
+				if ev._type != C.EV_KEY {
+					return false
+				}
+				if ev.value != 1 {
+					return false
+				}
+				switch state {
+				case 0:
+					if ev.code == C.KEY_CAPSLOCK {
+						state = 1
+						t = time.Now()
+						code = ev.code
+					}
+				case 1:
+					if time.Since(t) < interval && ev.code == code {
+						state = 2
+						t = time.Now()
+					} else {
+						state = 0
+					}
+				case 2:
+					state = 0
+					if time.Since(t) < interval {
+						writeEv(metaPress)
+						writeEv(raw)
+						writeEv(metaRelease)
+						return true
+					}
+				}
+				return false
+			}
+		}()
+
 		shiftToMeta := func() stateFunc {
 			state := 0
 			var t time.Time
@@ -244,6 +282,7 @@ func main() {
 			ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
 			for _, fn := range []stateFunc{
 				doubleShiftToCtrl,
+				doubleCapslockToMeta,
 				shiftToMeta,
 			} {
 				if fn(ev, raw) {
