@@ -3,8 +3,6 @@ package main
 /*
 #include <linux/uinput.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
 
@@ -38,7 +36,7 @@ import (
 )
 
 const (
-	KeyboardPath = "/dev/input/by-id/usb-CATEX_TECH._84EC-S_CA2017090002-event-kbd"
+	KeyboardPath = "/dev/input/by-id/usb-CATEX_TECH._87EC-S_CA2015090001-event-kbd"
 )
 
 var (
@@ -121,30 +119,16 @@ func main() {
 	interval := time.Millisecond * 800
 
 	go func() {
-		ctrlPress := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
-		ev := (*C.struct_input_event)(unsafe.Pointer(&ctrlPress[0]))
-		ev._type = C.EV_KEY
-		ev.code = C.KEY_LEFTCTRL
-		ev.value = 1
-		ctrlRelease := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
-		ev = (*C.struct_input_event)(unsafe.Pointer(&ctrlRelease[0]))
-		ev._type = C.EV_KEY
-		ev.code = C.KEY_LEFTCTRL
-		ev.value = 0
-		metaPress := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
-		ev = (*C.struct_input_event)(unsafe.Pointer(&metaPress[0]))
-		ev._type = C.EV_KEY
-		ev.code = C.KEY_LEFTMETA
-		ev.value = 1
-		metaRelease := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
-		ev = (*C.struct_input_event)(unsafe.Pointer(&metaRelease[0]))
-		ev._type = C.EV_KEY
-		ev.code = C.KEY_LEFTMETA
-		ev.value = 0
+		ctrlPress := rawEvent(C.EV_KEY, C.KEY_LEFTCTRL, 1)
+		ctrlRelease := rawEvent(C.EV_KEY, C.KEY_LEFTCTRL, 0)
+		metaPress := rawEvent(C.EV_KEY, C.KEY_LEFTMETA, 1)
+		metaRelease := rawEvent(C.EV_KEY, C.KEY_LEFTMETA, 0)
 
-		type state func(ev *C.struct_input_event, raw []byte) bool
+		type stateFunc func(ev *C.struct_input_event, raw []byte) bool
 
-		doubleShiftToCtrl := func() state {
+		//TODO repeatable ctrl + p/n
+
+		doubleShiftToCtrl := func() stateFunc {
 			state := 0
 			var t time.Time
 			var code C.ushort
@@ -152,54 +136,44 @@ func main() {
 				if ev._type != C.EV_KEY {
 					return false
 				}
+				if ev.value != 1 {
+					return false
+				}
 				switch state {
 				case 0:
-					if ev.code == C.KEY_LEFTSHIFT && ev.value == 1 ||
-						ev.code == C.KEY_RIGHTSHIFT && ev.value == 1 {
+					if ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT {
 						state = 1
 						t = time.Now()
 						code = ev.code
 					}
 				case 1:
-					if ev.code == code && ev.value == 0 && time.Since(t) < interval {
+					if time.Since(t) < interval && ev.code == code {
 						state = 2
 						t = time.Now()
+						return true
 					} else {
 						state = 0
 					}
 				case 2:
-					if ev.code == code && ev.value == 1 && time.Since(t) < interval {
-						state = 3
-						t = time.Now()
-						return true // ignore shift press
-					} else {
-						state = 0
-					}
-				case 3:
-					if ev.code == code && ev.value == 0 && time.Since(t) < interval {
-						state = 3
-						t = time.Now()
-					} else {
-						state = 0
-						if time.Since(t) < time.Second {
-							if _, err := syscall.Write(uinputFD, ctrlPress); err != nil {
-								panic(err)
-							}
-							if _, err := syscall.Write(uinputFD, raw); err != nil {
-								panic(err)
-							}
-							if _, err := syscall.Write(uinputFD, ctrlRelease); err != nil {
-								panic(err)
-							}
-							return true
+					state = 0
+					if time.Since(t) < time.Second {
+						if _, err := syscall.Write(uinputFD, ctrlPress); err != nil {
+							panic(err)
 						}
+						if _, err := syscall.Write(uinputFD, raw); err != nil {
+							panic(err)
+						}
+						if _, err := syscall.Write(uinputFD, ctrlRelease); err != nil {
+							panic(err)
+						}
+						return true
 					}
 				}
 				return false
 			}
 		}()
 
-		shiftToMeta := func() state {
+		shiftToMeta := func() stateFunc {
 			state := 0
 			var t time.Time
 			var code C.ushort
@@ -245,25 +219,38 @@ func main() {
 		}()
 
 		raw := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
+	next_key:
 		for {
 			if _, err := syscall.Read(keyboardFD, raw); err != nil {
 				panic(err)
 			}
 			ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
 			pt("%+v\n", ev)
-			if doubleShiftToCtrl(ev, raw) {
-				continue
-			}
-			if shiftToMeta(ev, raw) {
-				continue
+			for _, fn := range []stateFunc{
+				doubleShiftToCtrl,
+				shiftToMeta,
+			} {
+				if fn(ev, raw) {
+					continue next_key
+				}
 			}
 			if _, err := syscall.Write(uinputFD, raw); err != nil {
 				panic(err)
 			}
 		}
+
 	}()
 
 	sigs := make(chan os.Signal)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGKILL)
 	<-sigs
+}
+
+func rawEvent(_type C.ushort, code C.ushort, value C.int) []byte {
+	raw := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
+	ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
+	ev._type = _type
+	ev.code = code
+	ev.value = value
+	return raw
 }
