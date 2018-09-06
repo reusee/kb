@@ -24,6 +24,14 @@ void set_mask(unsigned long fd, unsigned long *mask) {
 	}
 }
 
+unsigned int eviocgbit(int a, int b) {
+	return EVIOCGBIT(a, b);
+}
+
+void pe() {
+	perror("error");
+}
+
 */
 import "C"
 
@@ -31,13 +39,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
-)
-
-const (
-	KeyboardPath = "/dev/input/by-id/usb-CATEX_TECH._87EC-S_CA2015090001-event-kbd"
 )
 
 var (
@@ -45,6 +51,36 @@ var (
 )
 
 func main() {
+
+	var KeyboardPath string
+	names, err := filepath.Glob("/dev/input/by-id/*")
+	if err != nil {
+		panic(err)
+	}
+	for _, name := range names {
+		if !strings.Contains(name, "event") {
+			continue
+		}
+		fd, err := syscall.Open(name, syscall.O_RDONLY, 0644)
+		if err != nil {
+			continue
+		}
+		bits := make([]byte, C.EV_MAX)
+		ctl(
+			fd,
+			uintptr(C.eviocgbit(0, C.EV_MAX)),
+			uintptr(unsafe.Pointer(&bits[0])),
+		)
+		syscall.Close(fd)
+		if testBit(C.EV_LED, bits) {
+			KeyboardPath = name
+			break
+		}
+	}
+	if KeyboardPath == "" {
+		panic("no keyboard with LED")
+	}
+	pt("%s\n", KeyboardPath)
 
 	keyboardFD, err := syscall.Open(KeyboardPath, syscall.O_RDONLY, 0644)
 	if err != nil {
@@ -59,18 +95,6 @@ func main() {
 		panic(err)
 	}
 	defer syscall.Close(uinputFD)
-
-	ctl := func(fd int, a1, a2 uintptr) {
-		_, _, errno := syscall.Syscall(
-			syscall.SYS_IOCTL,
-			uintptr(fd),
-			a1,
-			a2,
-		)
-		if errno != 0 {
-			panic("syscall")
-		}
-	}
 
 	ctl(
 		uinputFD,
@@ -243,4 +267,21 @@ func rawEvent(_type C.ushort, code C.ushort, value C.int) []byte {
 	ev.code = code
 	ev.value = value
 	return raw
+}
+
+func ctl(fd int, a1, a2 uintptr) {
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_IOCTL,
+		uintptr(fd),
+		a1,
+		a2,
+	)
+	if errno != 0 {
+		C.pe()
+		panic("syscall")
+	}
+}
+
+func testBit(n uint, bits []byte) bool {
+	return bits[n/8]&(1<<(n%8)) > 1
 }
