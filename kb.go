@@ -72,13 +72,13 @@ func main() {
 			uintptr(unsafe.Pointer(&bits[0])),
 		)
 		syscall.Close(fd)
-		if testBit(C.EV_LED, bits) {
+		if testBit(C.EV_REP, bits) {
 			KeyboardPath = name
 			break
 		}
 	}
 	if KeyboardPath == "" {
-		panic("no keyboard with LED")
+		panic("no keyboard")
 	}
 	pt("%s\n", KeyboardPath)
 
