@@ -156,7 +156,7 @@ func main() {
 					}
 				case 2:
 					state = 0
-					if time.Since(t) < time.Second {
+					if time.Since(t) < interval {
 						if _, err := syscall.Write(uinputFD, ctrlPress); err != nil {
 							panic(err)
 						}
@@ -201,7 +201,7 @@ func main() {
 					}
 				case 2:
 					state = 0
-					if time.Since(t) < time.Second {
+					if time.Since(t) < interval {
 						if _, err := syscall.Write(uinputFD, metaPress); err != nil {
 							panic(err)
 						}
