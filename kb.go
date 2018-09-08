@@ -272,6 +272,7 @@ func main() {
 				return false
 			}
 		}()
+		_ = shiftToMeta
 
 		raw := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
 	next_key:
@@ -283,7 +284,7 @@ func main() {
 			for _, fn := range []stateFunc{
 				doubleShiftToCtrl,
 				doubleCapslockToMeta,
-				shiftToMeta,
+				//shiftToMeta,
 			} {
 				if fn(ev, raw) {
 					continue next_key
