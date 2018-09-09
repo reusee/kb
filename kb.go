@@ -147,7 +147,7 @@ func main() {
 		)
 	}()
 
-	interval := time.Millisecond * 800
+	interval := time.Millisecond * 400
 
 	go func() {
 		ctrlPress := rawEvent(C.EV_KEY, C.KEY_LEFTCTRL, 1)
@@ -176,7 +176,9 @@ func main() {
 						code = ev.code
 					}
 				case 1:
-					if time.Since(t) < interval && ev.code == code {
+					s := time.Since(t)
+					//pt("%v\n", s)
+					if s < interval && ev.code == code {
 						state = 2
 						t = time.Now()
 						return true
@@ -185,7 +187,9 @@ func main() {
 					}
 				case 2:
 					state = 0
-					if time.Since(t) < interval {
+					s := time.Since(t)
+					//pt("%v\n", s)
+					if s < interval {
 						writeEv(ctrlPress)
 						writeEv(raw)
 						writeEv(ctrlRelease)
@@ -215,7 +219,9 @@ func main() {
 						code = ev.code
 					}
 				case 1:
-					if time.Since(t) < interval && ev.code == code {
+					s := time.Since(t)
+					//pt("%v\n", s)
+					if s < interval && ev.code == code {
 						state = 2
 						t = time.Now()
 					} else {
@@ -223,7 +229,9 @@ func main() {
 					}
 				case 2:
 					state = 0
-					if time.Since(t) < interval {
+					s := time.Since(t)
+					//pt("%v\n", s)
+					if s < interval {
 						writeEv(metaPress)
 						writeEv(raw)
 						writeEv(metaRelease)
@@ -253,7 +261,9 @@ func main() {
 						code = ev.code
 					}
 				case 1:
-					if time.Since(t) < interval && (ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT) && ev.code != code {
+					s := time.Since(t)
+					//pt("%v\n", s)
+					if s < interval && (ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT) && ev.code != code {
 						state = 2
 						t = time.Now()
 						return true // ignore this shift press
@@ -262,7 +272,9 @@ func main() {
 					}
 				case 2:
 					state = 0
-					if time.Since(t) < interval {
+					s := time.Since(t)
+					//pt("%v\n", s)
+					if s < interval {
 						writeEv(metaPress)
 						writeEv(raw)
 						writeEv(metaRelease)
