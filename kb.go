@@ -204,12 +204,12 @@ func main() {
 			state := 0
 			var t time.Time
 			var code C.ushort
-			return func(ev *C.struct_input_event, raw []byte) bool {
+			return func(ev *C.struct_input_event, raw []byte) (swallow bool) {
 				if ev._type != C.EV_KEY {
-					return false
+					return
 				}
 				if ev.value != 1 {
-					return false
+					return
 				}
 				switch state {
 				case 0:
@@ -231,14 +231,17 @@ func main() {
 					state = 0
 					s := time.Since(t)
 					//pt("%v\n", s)
-					if s < interval {
+					if s < interval && ev.code != code {
 						writeEv(metaPress)
 						writeEv(raw)
 						writeEv(metaRelease)
-						return true
+						swallow = true
 					}
 				}
-				return false
+				if ev.code == C.KEY_CAPSLOCK {
+					swallow = true
+				}
+				return
 			}
 		}()
 
