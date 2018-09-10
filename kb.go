@@ -245,50 +245,6 @@ func main() {
 			}
 		}()
 
-		shiftToMeta := func() stateFunc {
-			state := 0
-			var t time.Time
-			var code C.ushort
-			return func(ev *C.struct_input_event, raw []byte) bool {
-				if ev._type != C.EV_KEY {
-					return false
-				}
-				if ev.value != 1 {
-					return false
-				}
-				switch state {
-				case 0:
-					if ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT {
-						state = 1
-						t = time.Now()
-						code = ev.code
-					}
-				case 1:
-					s := time.Since(t)
-					//pt("%v\n", s)
-					if s < interval && (ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT) && ev.code != code {
-						state = 2
-						t = time.Now()
-						return true // ignore this shift press
-					} else {
-						state = 0
-					}
-				case 2:
-					state = 0
-					s := time.Since(t)
-					//pt("%v\n", s)
-					if s < interval {
-						writeEv(metaPress)
-						writeEv(raw)
-						writeEv(metaRelease)
-						return true
-					}
-				}
-				return false
-			}
-		}()
-		_ = shiftToMeta
-
 		raw := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
 	next_key:
 		for {
@@ -299,7 +255,6 @@ func main() {
 			for _, fn := range []stateFunc{
 				doubleShiftToCtrl,
 				doubleCapslockToMeta,
-				//shiftToMeta,
 			} {
 				if fn(ev, raw) {
 					continue next_key
