@@ -200,7 +200,7 @@ func main() {
 			}
 		}()
 
-		doubleCapslockToMeta := func() stateFunc {
+		capslockToMeta := func() stateFunc {
 			state := 0
 			var t time.Time
 			var code C.ushort
@@ -219,15 +219,6 @@ func main() {
 						code = ev.code
 					}
 				case 1:
-					s := time.Since(t)
-					//pt("%v\n", s)
-					if s < interval && ev.code == code {
-						state = 2
-						t = time.Now()
-					} else {
-						state = 0
-					}
-				case 2:
 					state = 0
 					s := time.Since(t)
 					//pt("%v\n", s)
@@ -254,7 +245,7 @@ func main() {
 			ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
 			for _, fn := range []stateFunc{
 				doubleShiftToCtrl,
-				doubleCapslockToMeta,
+				capslockToMeta,
 			} {
 				if fn(ev, raw) {
 					continue next_key
