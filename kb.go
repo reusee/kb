@@ -263,7 +263,6 @@ func main() {
 				}
 			}
 			states = newStates
-			pt("%+v\n", newStates)
 			if hasPartialMatch {
 				// delay key
 				delayed = append(delayed, raw)
