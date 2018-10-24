@@ -154,6 +154,9 @@ func main() {
 					return waitNextShift, false
 				}
 				if ev.value != 1 {
+					if ev.code != code {
+						return nil, false
+					}
 					return waitNextShift, false
 				}
 				if time.Since(t) > interval {
@@ -205,6 +208,9 @@ func main() {
 					return waitNextKey, false
 				}
 				if ev.value != 1 {
+					if ev.code != C.KEY_CAPSLOCK {
+						return nil, true
+					}
 					return waitNextKey, false
 				}
 				if time.Since(t) > interval {
