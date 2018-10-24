@@ -140,6 +140,9 @@ func main() {
 				if ev.value != 1 {
 					return false
 				}
+				if state == 2 && time.Since(t) > interval {
+					state = 0
+				}
 				switch state {
 				case 0:
 					if ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT {
@@ -159,14 +162,10 @@ func main() {
 					}
 				case 2:
 					state = 0
-					s := time.Since(t)
-					//pt("%v\n", s)
-					if s < interval {
-						writeEv(ctrlPress)
-						writeEv(raw)
-						writeEv(ctrlRelease)
-						return true
-					}
+					writeEv(ctrlPress)
+					writeEv(raw)
+					writeEv(ctrlRelease)
+					return true
 				}
 				return false
 			}
@@ -183,6 +182,9 @@ func main() {
 				if ev.value != 1 {
 					return
 				}
+				if state == 1 && (time.Since(t) > interval || ev.code == code) {
+					state = 0
+				}
 				switch state {
 				case 0:
 					if ev.code == C.KEY_CAPSLOCK {
@@ -192,14 +194,10 @@ func main() {
 					}
 				case 1:
 					state = 0
-					s := time.Since(t)
-					//pt("%v\n", s)
-					if s < interval && ev.code != code {
-						writeEv(metaPress)
-						writeEv(raw)
-						writeEv(metaRelease)
-						swallow = true
-					}
+					writeEv(metaPress)
+					writeEv(raw)
+					writeEv(metaRelease)
+					swallow = true
 				}
 				if ev.code == C.KEY_CAPSLOCK {
 					swallow = true
