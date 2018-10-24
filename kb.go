@@ -127,49 +127,59 @@ func main() {
 		metaPress := rawEvent(C.EV_KEY, C.KEY_LEFTMETA, 1)
 		metaRelease := rawEvent(C.EV_KEY, C.KEY_LEFTMETA, 0)
 
-		type stateFunc func(ev *C.struct_input_event, raw []byte) bool
+		type stateFunc func(ev *C.struct_input_event, raw []byte) stateFunc
 
-		doubleShiftToCtrl := func() stateFunc {
-			state := 0
-			var t time.Time
-			var code C.ushort
-			return func(ev *C.struct_input_event, raw []byte) bool {
+		var doubleShiftToCtrl stateFunc
+		doubleShiftToCtrl = func(ev *C.struct_input_event, raw []byte) stateFunc {
+			if ev._type != C.EV_KEY {
+				return nil
+			}
+			if ev.value != 1 {
+				return nil
+			}
+			if ev.code != C.KEY_LEFTSHIFT && ev.code != C.KEY_RIGHTSHIFT {
+				return nil
+			}
+			// wait next shift
+			code := ev.code
+			t := time.Now()
+			var waitNextShift stateFunc
+			waitNextShift = func(ev *C.struct_input_event, raw []byte) stateFunc {
 				if ev._type != C.EV_KEY {
-					return false
+					return waitNextShift
 				}
 				if ev.value != 1 {
-					return false
+					return waitNextShift
 				}
-				if state == 2 && time.Since(t) > interval {
-					state = 0
+				if time.Since(t) > interval {
+					return nil
 				}
-				switch state {
-				case 0:
+				if ev.code != code {
+					return nil
+				}
+				t = time.Now()
+				var waitNextKey stateFunc
+				waitNextKey = func(ev *C.struct_input_event, raw []byte) stateFunc {
+					if ev._type != C.EV_KEY {
+						return waitNextKey
+					}
+					if ev.value != 1 {
+						return waitNextKey
+					}
+					if time.Since(t) > interval {
+						return nil
+					}
 					if ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT {
-						state = 1
-						t = time.Now()
-						code = ev.code
+						return nil
 					}
-				case 1:
-					s := time.Since(t)
-					//pt("%v\n", s)
-					if s < interval && ev.code == code {
-						state = 2
-						t = time.Now()
-						return true
-					} else {
-						state = 0
-					}
-				case 2:
-					state = 0
 					writeEv(ctrlPress)
 					writeEv(raw)
 					writeEv(ctrlRelease)
-					return true
 				}
-				return false
+				return waitNextKey
 			}
-		}()
+			return waitNextShift
+		}
 
 		capslockToMeta := func() stateFunc {
 			state := 0
