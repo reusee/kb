@@ -272,7 +272,7 @@ func main() {
 			}
 		}()
 
-		ticker, closeTicker := new1KHzTicker()
+		ticker, closeTicker := new100HzTicker()
 		defer closeTicker()
 
 		for {
@@ -395,7 +395,7 @@ func testBit(n uint, bits []byte) bool {
 	return bits[n/8]&(1<<(n%8)) > 1
 }
 
-func new1KHzTicker() (chan struct{}, func()) {
+func new100HzTicker() (chan struct{}, func()) {
 	c := make(chan struct{})
 	fd, _, errno := syscall.RawSyscall(syscall.SYS_TIMERFD_CREATE, unix.CLOCK_MONOTONIC, 0, 0)
 	if errno > 0 {
@@ -403,10 +403,10 @@ func new1KHzTicker() (chan struct{}, func()) {
 	}
 	timerspec := &C.struct_itimerspec{
 		it_interval: C.struct_timespec{
-			tv_nsec: 1 * 1000 * 1000,
+			tv_nsec: 10 * 1000 * 1000,
 		},
 		it_value: C.struct_timespec{
-			tv_nsec: 1 * 1000 * 1000,
+			tv_nsec: 10 * 1000 * 1000,
 		},
 	}
 	_, _, errno = syscall.RawSyscall(syscall.SYS_TIMERFD_SETTIME, fd, 0, uintptr(unsafe.Pointer(timerspec)))
