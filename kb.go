@@ -119,7 +119,7 @@ func main() {
 		)
 	}()
 
-	interval := time.Millisecond * 400
+	timeout := 40
 
 	go func() {
 		ctrlPress := rawEvent(C.EV_KEY, C.KEY_LEFTCTRL, 1)
@@ -133,25 +133,25 @@ func main() {
 		) (
 			next stateFunc,
 			full bool,
+			timeout int,
 		)
 
 		var doubleShiftToCtrl stateFunc
-		doubleShiftToCtrl = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool) {
+		doubleShiftToCtrl = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int) {
 			if ev._type != C.EV_KEY {
-				return nil, false
+				return nil, false, 0
 			}
 			if ev.value != 1 {
-				return nil, false
+				return nil, false, 0
 			}
 			if ev.code != C.KEY_LEFTSHIFT && ev.code != C.KEY_RIGHTSHIFT {
-				return nil, false
+				return nil, false, 0
 			}
-			t := time.Now()
 			code := ev.code
 			var waitNextShift stateFunc
-			waitNextShift = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool) {
+			waitNextShift = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int) {
 				if ev._type != C.EV_KEY {
-					return waitNextShift, false
+					return waitNextShift, false, timeout
 				}
 				if ev.value != 1 {
 					/*
@@ -160,57 +160,49 @@ func main() {
 						所以在 key release 时，中止匹配
 					*/
 					if ev.code != code {
-						return nil, false
+						return nil, false, 0
 					}
-					return waitNextShift, false
-				}
-				if time.Since(t) > interval {
-					return nil, false
+					return waitNextShift, false, timeout
 				}
 				if ev.code != code {
-					return nil, false
+					return nil, false, 0
 				}
-				t := time.Now()
 				var waitNextKey stateFunc
-				waitNextKey = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool) {
+				waitNextKey = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int) {
 					if ev._type != C.EV_KEY {
-						return waitNextKey, false
+						return waitNextKey, false, timeout
 					}
 					if ev.value != 1 {
-						return waitNextKey, false
-					}
-					if time.Since(t) > interval {
-						return nil, false
+						return waitNextKey, false, timeout
 					}
 					if ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT {
-						return nil, false
+						return nil, false, 0
 					}
 					writeEv(ctrlPress)
 					writeEv(raw)
 					writeEv(ctrlRelease)
-					return nil, true
+					return nil, true, 0
 				}
-				return waitNextKey, false
+				return waitNextKey, false, timeout
 			}
-			return waitNextShift, false
+			return waitNextShift, false, timeout
 		}
 
 		var capslockToMeta stateFunc
-		capslockToMeta = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool) {
+		capslockToMeta = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int) {
 			if ev._type != C.EV_KEY {
-				return nil, false
+				return nil, false, 0
 			}
 			if ev.value != 1 {
-				return nil, false
+				return nil, false, 0
 			}
 			if ev.code != C.KEY_CAPSLOCK {
-				return nil, false
+				return nil, false, 0
 			}
-			t := time.Now()
 			var waitNextKey stateFunc
-			waitNextKey = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool) {
+			waitNextKey = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int) {
 				if ev._type != C.EV_KEY {
-					return waitNextKey, false
+					return waitNextKey, false, timeout
 				}
 				if ev.value != 1 {
 					/*
@@ -220,75 +212,132 @@ func main() {
 					*/
 					if ev.code != C.KEY_CAPSLOCK {
 						writeEv(raw)
-						return nil, true
+						return nil, true, 0
 					}
-					return waitNextKey, false
-				}
-				if time.Since(t) > interval {
-					return nil, true
+					return waitNextKey, false, timeout
 				}
 				if ev.code == C.KEY_CAPSLOCK {
-					return nil, true
+					return nil, true, 0
 				}
 				writeEv(metaPress)
 				writeEv(raw)
 				writeEv(metaRelease)
-				return nil, true
+				return nil, true, 0
 			}
-			return waitNextKey, false
+			return waitNextKey, false, timeout
 		}
 
 		fns := []stateFunc{
 			doubleShiftToCtrl,
 			capslockToMeta,
 		}
-		var states []stateFunc
+		type State struct {
+			fn      stateFunc
+			timeout int
+		}
+		var states []*State
 		var delayed [][]byte
 
+		type Event struct {
+			ev  *C.struct_input_event
+			raw []byte
+		}
+		evCh := make(chan Event, 128)
+
+		go func() {
+			for {
+				raw := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
+				if _, err := syscall.Read(keyboardFD, raw); err != nil {
+					panic(err)
+				}
+				ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
+				evCh <- Event{
+					ev:  ev,
+					raw: raw,
+				}
+			}
+		}()
+
+		ticker := time.NewTicker(time.Millisecond * 10)
+
 		for {
-			raw := make([]byte, unsafe.Sizeof(C.struct_input_event{}))
-			if _, err := syscall.Read(keyboardFD, raw); err != nil {
-				panic(err)
-			}
-			ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
+			pt("%+v\n", states)
+			pt("%+v\n", delayed)
+			select {
 
-			var newStates []stateFunc
-			hasPartialMatch := false
-			hasFullMatch := false
-			for _, fn := range fns {
-				state, full := fn(ev, raw)
-				if full {
-					hasFullMatch = true
-				} else if state != nil {
-					hasPartialMatch = true
-					newStates = append(newStates, state)
+			case ev := <-evCh:
+				var newStates []*State
+				hasPartialMatch := false
+				hasFullMatch := false
+				for _, fn := range fns {
+					next, full, t := fn(ev.ev, ev.raw)
+					if full {
+						hasFullMatch = true
+					} else if next != nil {
+						hasPartialMatch = true
+						newStates = append(newStates, &State{
+							fn:      next,
+							timeout: t,
+						})
+					}
 				}
-			}
-			for _, fn := range states {
-				state, full := fn(ev, raw)
-				if full {
-					hasFullMatch = true
-				} else if state != nil {
-					hasPartialMatch = true
-					newStates = append(newStates, state)
+				for _, state := range states {
+					next, full, t := state.fn(ev.ev, ev.raw)
+					if full {
+						hasFullMatch = true
+					} else if next != nil {
+						hasPartialMatch = true
+						newStates = append(newStates, &State{
+							fn:      next,
+							timeout: t,
+						})
+					}
 				}
-			}
-			states = newStates
-			if hasPartialMatch {
-				// delay key
-				delayed = append(delayed, raw)
-			} else if hasFullMatch {
-				// clear delayed key
-				delayed = delayed[0:0:cap(delayed)]
-			} else {
-				// pop keys
-				for _, r := range delayed {
-					writeEv(r)
+				states = newStates
+				if hasPartialMatch {
+					// delay key
+					delayed = append(delayed, ev.raw)
+				} else if hasFullMatch {
+					// clear delayed key
+					delayed = delayed[0:0:cap(delayed)]
+				} else {
+					// pop keys
+					for _, r := range delayed {
+						writeEv(r)
+					}
+					delayed = delayed[0:0:cap(delayed)]
+					writeEv(ev.raw)
 				}
-				delayed = delayed[0:0:cap(delayed)]
-				writeEv(raw)
-			}
 
+			case <-func() <-chan time.Time {
+				if len(states) > 0 || len(delayed) > 0 {
+					return ticker.C
+				}
+				return nil
+			}():
+				for i := 0; i < len(states); {
+					state := states[i]
+					state.timeout--
+					if state.timeout == 0 {
+						// delete
+						copy(
+							states[i:len(states)-1],
+							states[i+1:len(states)],
+						)
+						states = states[: len(states)-1 : cap(states)]
+						continue
+					}
+					i++
+				}
+				if len(states) == 0 {
+					// pop
+					for _, r := range delayed {
+						writeEv(r)
+					}
+					delayed = delayed[0:0:cap(delayed)]
+				}
+
+			}
 		}
 
 	}()
