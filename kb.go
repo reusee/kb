@@ -2,6 +2,7 @@ package main
 
 /*
 #include <linux/uinput.h>
+#include <sys/timerfd.h>
 #include <string.h>
 #include "kb.h"
 */
@@ -14,8 +15,9 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -270,7 +272,8 @@ func main() {
 			}
 		}()
 
-		ticker := time.NewTicker(time.Millisecond * 10)
+		ticker, closeTicker := new1KHzTicker()
+		defer closeTicker()
 
 		for {
 			//pt("%+v\n", states)
@@ -323,9 +326,9 @@ func main() {
 					writeEv(ev.raw)
 				}
 
-			case <-func() <-chan time.Time {
+			case <-func() chan struct{} {
 				if len(states) > 0 || len(delayed) > 0 {
-					return ticker.C
+					return ticker
 				}
 				return nil
 			}():
@@ -390,4 +393,37 @@ func ctl(fd int, a1, a2 uintptr) {
 
 func testBit(n uint, bits []byte) bool {
 	return bits[n/8]&(1<<(n%8)) > 1
+}
+
+func new1KHzTicker() (chan struct{}, func()) {
+	c := make(chan struct{})
+	fd, _, errno := syscall.RawSyscall(syscall.SYS_TIMERFD_CREATE, unix.CLOCK_MONOTONIC, 0, 0)
+	if errno > 0 {
+		panic(errno.Error())
+	}
+	timerspec := &C.struct_itimerspec{
+		it_interval: C.struct_timespec{
+			tv_nsec: 1 * 1000 * 1000,
+		},
+		it_value: C.struct_timespec{
+			tv_nsec: 1 * 1000 * 1000,
+		},
+	}
+	_, _, errno = syscall.RawSyscall(syscall.SYS_TIMERFD_SETTIME, fd, 0, uintptr(unsafe.Pointer(timerspec)))
+	if errno > 0 {
+		panic(errno.Error())
+	}
+	close := func() {
+		syscall.Close(int(fd))
+	}
+	go func() {
+		var buf [8]byte
+		for {
+			if _, err := syscall.Read(int(fd), buf[:]); err != nil {
+				return
+			}
+			c <- struct{}{}
+		}
+	}()
+	return c, close
 }
