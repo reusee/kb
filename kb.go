@@ -127,6 +127,9 @@ func main() {
 		metaPress := rawEvent(C.EV_KEY, C.KEY_LEFTMETA, 1)
 		metaRelease := rawEvent(C.EV_KEY, C.KEY_LEFTMETA, 0)
 
+		type timeoutFn func() (
+			full bool,
+		)
 		type stateFunc func(
 			ev *C.struct_input_event,
 			raw []byte,
@@ -134,24 +137,32 @@ func main() {
 			next stateFunc,
 			full bool,
 			timeout int,
+			timeoutFn timeoutFn,
 		)
 
+		timeoutNoMatch := timeoutFn(func() bool {
+			return false
+		})
+		timeoutFullMatch := timeoutFn(func() bool {
+			return true
+		})
+
 		var doubleShiftToCtrl stateFunc
-		doubleShiftToCtrl = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int) {
+		doubleShiftToCtrl = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int, timeoutFn) {
 			if ev._type != C.EV_KEY {
-				return nil, false, 0
+				return nil, false, 0, nil
 			}
 			if ev.value != 1 {
-				return nil, false, 0
+				return nil, false, 0, nil
 			}
 			if ev.code != C.KEY_LEFTSHIFT && ev.code != C.KEY_RIGHTSHIFT {
-				return nil, false, 0
+				return nil, false, 0, nil
 			}
 			code := ev.code
 			var waitNextShift stateFunc
-			waitNextShift = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int) {
+			waitNextShift = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int, timeoutFn) {
 				if ev._type != C.EV_KEY {
-					return waitNextShift, false, timeout
+					return waitNextShift, false, timeout, timeoutNoMatch
 				}
 				if ev.value != 1 {
 					/*
@@ -160,49 +171,49 @@ func main() {
 						所以在 key release 时，中止匹配
 					*/
 					if ev.code != code {
-						return nil, false, 0
+						return nil, false, 0, nil
 					}
-					return waitNextShift, false, timeout
+					return waitNextShift, false, timeout, timeoutNoMatch
 				}
 				if ev.code != code {
-					return nil, false, 0
+					return nil, false, 0, nil
 				}
 				var waitNextKey stateFunc
-				waitNextKey = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int) {
+				waitNextKey = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int, timeoutFn) {
 					if ev._type != C.EV_KEY {
-						return waitNextKey, false, timeout
+						return waitNextKey, false, timeout, timeoutNoMatch
 					}
 					if ev.value != 1 {
-						return waitNextKey, false, timeout
+						return waitNextKey, false, timeout, timeoutNoMatch
 					}
 					if ev.code == C.KEY_LEFTSHIFT || ev.code == C.KEY_RIGHTSHIFT {
-						return nil, false, 0
+						return nil, false, 0, nil
 					}
 					writeEv(ctrlPress)
 					writeEv(raw)
 					writeEv(ctrlRelease)
-					return nil, true, 0
+					return nil, true, 0, nil
 				}
-				return waitNextKey, false, timeout
+				return waitNextKey, false, timeout, timeoutNoMatch
 			}
-			return waitNextShift, false, timeout
+			return waitNextShift, false, timeout, timeoutNoMatch
 		}
 
 		var capslockToMeta stateFunc
-		capslockToMeta = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int) {
+		capslockToMeta = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int, timeoutFn) {
 			if ev._type != C.EV_KEY {
-				return nil, false, 0
+				return nil, false, 0, nil
 			}
 			if ev.value != 1 {
-				return nil, false, 0
+				return nil, false, 0, nil
 			}
 			if ev.code != C.KEY_CAPSLOCK {
-				return nil, false, 0
+				return nil, false, 0, nil
 			}
 			var waitNextKey stateFunc
-			waitNextKey = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int) {
+			waitNextKey = func(ev *C.struct_input_event, raw []byte) (stateFunc, bool, int, timeoutFn) {
 				if ev._type != C.EV_KEY {
-					return waitNextKey, false, timeout
+					return waitNextKey, false, timeout, timeoutFullMatch
 				}
 				if ev.value != 1 {
 					/*
@@ -212,19 +223,19 @@ func main() {
 					*/
 					if ev.code != C.KEY_CAPSLOCK {
 						writeEv(raw)
-						return nil, true, 0
+						return nil, true, 0, nil
 					}
-					return waitNextKey, false, timeout
+					return waitNextKey, false, timeout, timeoutFullMatch
 				}
 				if ev.code == C.KEY_CAPSLOCK {
-					return nil, true, 0
+					return nil, true, 0, nil
 				}
 				writeEv(metaPress)
 				writeEv(raw)
 				writeEv(metaRelease)
-				return nil, true, 0
+				return nil, true, 0, nil
 			}
-			return waitNextKey, false, timeout
+			return waitNextKey, false, timeout, timeoutFullMatch
 		}
 
 		fns := []stateFunc{
@@ -232,8 +243,9 @@ func main() {
 			capslockToMeta,
 		}
 		type State struct {
-			fn      stateFunc
-			timeout int
+			fn        stateFunc
+			timeout   int
+			timeoutFn timeoutFn
 		}
 		var states []*State
 		var delayed [][]byte
@@ -270,26 +282,28 @@ func main() {
 				hasPartialMatch := false
 				hasFullMatch := false
 				for _, fn := range fns {
-					next, full, t := fn(ev.ev, ev.raw)
+					next, full, t, timeoutFn := fn(ev.ev, ev.raw)
 					if full {
 						hasFullMatch = true
 					} else if next != nil {
 						hasPartialMatch = true
 						newStates = append(newStates, &State{
-							fn:      next,
-							timeout: t,
+							fn:        next,
+							timeout:   t,
+							timeoutFn: timeoutFn,
 						})
 					}
 				}
 				for _, state := range states {
-					next, full, t := state.fn(ev.ev, ev.raw)
+					next, full, t, timeoutFn := state.fn(ev.ev, ev.raw)
 					if full {
 						hasFullMatch = true
 					} else if next != nil {
 						hasPartialMatch = true
 						newStates = append(newStates, &State{
-							fn:      next,
-							timeout: t,
+							fn:        next,
+							timeout:   t,
+							timeoutFn: timeoutFn,
 						})
 					}
 				}
@@ -315,10 +329,13 @@ func main() {
 				}
 				return nil
 			}():
+				hasFullMatch := false
 				for i := 0; i < len(states); {
 					state := states[i]
 					state.timeout--
 					if state.timeout == 0 {
+						// timeoutFn
+						hasFullMatch = hasFullMatch || state.timeoutFn()
 						// delete
 						copy(
 							states[i:len(states)-1],
@@ -330,9 +347,11 @@ func main() {
 					i++
 				}
 				if len(states) == 0 {
-					// pop
-					for _, r := range delayed {
-						writeEv(r)
+					if !hasFullMatch {
+						// pop
+						for _, r := range delayed {
+							writeEv(r)
+						}
 					}
 					delayed = delayed[0:0:cap(delayed)]
 				}
