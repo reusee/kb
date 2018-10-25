@@ -273,8 +273,8 @@ func main() {
 		ticker := time.NewTicker(time.Millisecond * 10)
 
 		for {
-			pt("%+v\n", states)
-			pt("%+v\n", delayed)
+			//pt("%+v\n", states)
+			//pt("%+v\n", delayed)
 			select {
 
 			case ev := <-evCh:
