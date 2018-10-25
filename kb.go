@@ -154,6 +154,11 @@ func main() {
 					return waitNextShift, false
 				}
 				if ev.value != 1 {
+					/*
+						key press -> shift press -> shift release -> key release
+						这个序列会导致 key release 事件被延迟，会产生 key repeat
+						所以在 key release 时，中止匹配
+					*/
 					if ev.code != code {
 						return nil, false
 					}
@@ -208,7 +213,13 @@ func main() {
 					return waitNextKey, false
 				}
 				if ev.value != 1 {
+					/*
+						key press -> capslock press -> capslock release -> key release
+						这个序列会导致 key release 事件被延迟，产生 key repeat
+						所以在 key release 时，写入该 release 事件，并返回匹配成功
+					*/
 					if ev.code != C.KEY_CAPSLOCK {
+						writeEv(raw)
 						return nil, true
 					}
 					return waitNextKey, false
