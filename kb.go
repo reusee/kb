@@ -276,8 +276,8 @@ func main() {
 		defer closeTicker()
 
 		for {
-			//pt("%+v\n", states)
-			//pt("%+v\n", delayed)
+			//pt("STATES: %+v\n", states)
+			//pt("DELAYED: %+v\n", delayed)
 			select {
 
 			case ev := <-evCh:
@@ -314,10 +314,12 @@ func main() {
 				if hasPartialMatch {
 					// delay key
 					delayed = append(delayed, ev.raw)
-				} else if hasFullMatch {
+				}
+				if hasFullMatch {
 					// clear delayed key
 					delayed = delayed[0:0:cap(delayed)]
-				} else {
+				}
+				if !hasPartialMatch && !hasFullMatch {
 					// pop keys
 					for _, r := range delayed {
 						writeEv(r)
