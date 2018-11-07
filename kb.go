@@ -103,6 +103,13 @@ func main() {
 	}()
 
 	writeEv := func(raw []byte) {
+
+		// filter
+		ev := (*C.struct_input_event)(unsafe.Pointer(&raw[0]))
+		if ev.code == C.KEY_CAPSLOCK {
+			return
+		}
+
 		if _, err := syscall.Write(uinputFD, raw); err != nil {
 			panic(err)
 		}
