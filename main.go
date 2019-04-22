@@ -4,24 +4,9 @@ package main
 #include <linux/uinput.h>
 #include <sys/timerfd.h>
 #include <malloc.h>
+#include <fcntl.h>
 #include <string.h>
-
-unsigned long* get_mask(unsigned long fd) {
-	unsigned long *mask = malloc(
-		(KEY_MAX+(sizeof(unsigned long)*8)-1)/(sizeof(unsigned long)*8)
-	);
-	ioctl(fd, EVIOCGBIT(EV_KEY, KEY_MAX), mask);
-	return mask;
-}
-
-void set_mask(unsigned long fd, unsigned long *mask) {
-	int key;
-	for (key = KEY_RESERVED; key <= KEY_MAX; key++) {
-		if ((mask[key / (sizeof(unsigned long) * 8)] >> (key % (sizeof(unsigned long) * 8))) & 1) {
-			ioctl(fd, UI_SET_KEYBIT, key);
-		}
-	}
-}
+#include <unistd.h>
 
 unsigned int eviocgbit(int a, int b) {
 	return EVIOCGBIT(a, b);
@@ -29,6 +14,36 @@ unsigned int eviocgbit(int a, int b) {
 
 void pe() {
 	perror("error");
+}
+
+int setup_uinput(int keyboard_fd) {
+  struct uinput_setup usetup;
+  int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+  ioctl(fd, UI_SET_EVBIT, EV_KEY);
+  int key;
+	unsigned long *mask = malloc(
+		(KEY_MAX+(sizeof(unsigned long)*8)-1)/(sizeof(unsigned long)*8)
+	);
+	ioctl(keyboard_fd, EVIOCGBIT(EV_KEY, KEY_MAX), mask);
+  for (key = KEY_RESERVED; key <= KEY_MAX; key++) {
+    if ((mask[key / (sizeof(unsigned long) * 8)] >> (key % (sizeof(unsigned long) * 8))) & 1) {
+      ioctl(fd, UI_SET_KEYBIT, key);
+    }
+  }
+  memset(&usetup, 0, sizeof(usetup));
+  usetup.id.bustype = BUS_USB;
+  usetup.id.vendor = 0xdead;
+  usetup.id.product = 0xbeef;
+  strcpy(usetup.name, "keyboard");
+  ioctl(fd, UI_DEV_SETUP, &usetup);
+  ioctl(fd, UI_DEV_CREATE);
+  sleep(1);
+  return fd;
+}
+
+void close_uinput(int fd) {
+  ioctl(fd, UI_DEV_DESTROY);
+  close(fd);
 }
 
 */
@@ -88,45 +103,8 @@ func main() {
 	}
 	defer syscall.Close(keyboardFD)
 
-	mask := C.get_mask(C.ulong(keyboardFD))
-
-	uinputFD, err := syscall.Open("/dev/uinput", syscall.O_WRONLY|syscall.O_NONBLOCK, 0644)
-	if err != nil {
-		panic(err)
-	}
-	defer syscall.Close(uinputFD)
-
-	ctl(
-		uinputFD,
-		C.UI_SET_EVBIT,
-		C.EV_KEY,
-	)
-	C.set_mask(C.ulong(uinputFD), mask)
-	var usetup C.struct_uinput_setup
-	usetup.id.bustype = C.BUS_USB
-	usetup.id.vendor = 0xdead
-	usetup.id.product = 0xbeef
-	C.strcpy(
-		&usetup.name[0],
-		C.CString("foo"),
-	)
-	ctl(
-		uinputFD,
-		C.UI_DEV_SETUP,
-		uintptr(unsafe.Pointer(&usetup)),
-	)
-	ctl(
-		uinputFD,
-		C.UI_DEV_CREATE,
-		0,
-	)
-	defer func() {
-		ctl(
-			uinputFD,
-			C.UI_DEV_DESTROY,
-			0,
-		)
-	}()
+	uinputFD := C.setup_uinput(C.int(keyboardFD))
+	defer C.close_uinput(uinputFD)
 
 	writeEv := func(raw []byte) {
 
@@ -136,7 +114,7 @@ func main() {
 			return
 		}
 
-		if _, err := syscall.Write(uinputFD, raw); err != nil {
+		if _, err := syscall.Write(int(uinputFD), raw); err != nil {
 			panic(err)
 		}
 	}
