@@ -12,10 +12,6 @@ unsigned int eviocgbit(int a, int b) {
 	return EVIOCGBIT(a, b);
 }
 
-void pe() {
-	perror("error");
-}
-
 int setup_uinput(int keyboard_fd) {
   struct uinput_setup usetup;
   int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
@@ -133,7 +129,7 @@ func main() {
 	}()
 
 	tickDuration := time.Millisecond * 3
-	timeoutDuration := time.Millisecond * 40
+	timeoutDuration := time.Millisecond * 150
 	timeout := int(math.Floor(float64(timeoutDuration) / float64(tickDuration)))
 
 	go func() {
@@ -400,8 +396,7 @@ func ctl(fd int, a1, a2 uintptr) {
 		a2,
 	)
 	if errno != 0 {
-		C.pe()
-		panic("syscall")
+		panic(errno.Error())
 	}
 }
 
