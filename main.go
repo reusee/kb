@@ -51,14 +51,14 @@ import "C"
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
-
-	"golang.org/x/sys/unix"
 )
 
 var (
@@ -132,7 +132,9 @@ func main() {
 		)
 	}()
 
-	timeout := 40
+	tickDuration := time.Millisecond * 3
+	timeoutDuration := time.Millisecond * 40
+	timeout := int(math.Floor(float64(timeoutDuration) / float64(tickDuration)))
 
 	go func() {
 		ctrlPress := rawEvent(C.EV_KEY, C.KEY_LEFTCTRL, 1)
@@ -283,8 +285,7 @@ func main() {
 			}
 		}()
 
-		ticker, closeTicker := new100HzTicker()
-		defer closeTicker()
+		ticker := time.NewTicker(tickDuration)
 
 		for {
 			//pt("STATES: %+v\n", states)
@@ -339,9 +340,9 @@ func main() {
 					writeEv(ev.raw)
 				}
 
-			case <-func() chan struct{} {
+			case <-func() <-chan time.Time {
 				if len(states) > 0 || len(delayed) > 0 {
-					return ticker
+					return ticker.C
 				}
 				return nil
 			}():
@@ -406,37 +407,4 @@ func ctl(fd int, a1, a2 uintptr) {
 
 func testBit(n uint, bits []byte) bool {
 	return bits[n/8]&(1<<(n%8)) > 1
-}
-
-func new100HzTicker() (chan struct{}, func()) {
-	c := make(chan struct{})
-	fd, _, errno := syscall.RawSyscall(syscall.SYS_TIMERFD_CREATE, unix.CLOCK_MONOTONIC, 0, 0)
-	if errno > 0 {
-		panic(errno.Error())
-	}
-	timerspec := &C.struct_itimerspec{
-		it_interval: C.struct_timespec{
-			tv_nsec: 10 * 1000 * 1000,
-		},
-		it_value: C.struct_timespec{
-			tv_nsec: 10 * 1000 * 1000,
-		},
-	}
-	_, _, errno = syscall.RawSyscall(syscall.SYS_TIMERFD_SETTIME, fd, 0, uintptr(unsafe.Pointer(timerspec)))
-	if errno > 0 {
-		panic(errno.Error())
-	}
-	close := func() {
-		syscall.Close(int(fd))
-	}
-	go func() {
-		var buf [8]byte
-		for {
-			if _, err := syscall.Read(int(fd), buf[:]); err != nil {
-				return
-			}
-			c <- struct{}{}
-		}
-	}()
-	return c, close
 }
