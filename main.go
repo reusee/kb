@@ -129,7 +129,7 @@ func main() {
 	}()
 
 	tickDuration := time.Millisecond * 3
-	timeoutDuration := time.Millisecond * 150
+	timeoutDuration := time.Millisecond * 200
 	timeout := int(math.Floor(float64(timeoutDuration) / float64(tickDuration)))
 
 	go func() {
