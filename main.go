@@ -2,46 +2,6 @@ package main
 
 /*
 #include <linux/uinput.h>
-#include <sys/timerfd.h>
-#include <malloc.h>
-#include <fcntl.h>
-#include <string.h>
-#include <unistd.h>
-
-unsigned int eviocgbit(int a, int b) {
-	return EVIOCGBIT(a, b);
-}
-
-int setup_uinput(int keyboard_fd) {
-  struct uinput_setup usetup;
-  int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
-  ioctl(fd, UI_SET_EVBIT, EV_KEY);
-  int key;
-	unsigned long *mask = malloc(
-		(KEY_MAX+(sizeof(unsigned long)*8)-1)/(sizeof(unsigned long)*8)
-	);
-	ioctl(keyboard_fd, EVIOCGBIT(EV_KEY, KEY_MAX), mask);
-  for (key = KEY_RESERVED; key <= KEY_MAX; key++) {
-    if ((mask[key / (sizeof(unsigned long) * 8)] >> (key % (sizeof(unsigned long) * 8))) & 1) {
-      ioctl(fd, UI_SET_KEYBIT, key);
-    }
-  }
-  memset(&usetup, 0, sizeof(usetup));
-  usetup.id.bustype = BUS_USB;
-  usetup.id.vendor = 0xdead;
-  usetup.id.product = 0xbeef;
-  strcpy(usetup.name, "keyboard");
-  ioctl(fd, UI_DEV_SETUP, &usetup);
-  ioctl(fd, UI_DEV_CREATE);
-  sleep(1);
-  return fd;
-}
-
-void close_uinput(int fd) {
-  ioctl(fd, UI_DEV_DESTROY);
-  close(fd);
-}
-
 */
 import "C"
 
@@ -69,29 +29,17 @@ func main() {
 		panic(err)
 	}
 	for _, name := range names {
-		if !strings.Contains(name, "event") {
+		if !strings.HasSuffix(name, "event-kbd") ||
+			strings.Contains(name, "-if") {
 			continue
 		}
-		fd, err := syscall.Open(name, syscall.O_RDONLY, 0644)
-		if err != nil {
-			continue
-		}
-		bits := make([]byte, C.EV_MAX)
-		ctl(
-			fd,
-			uintptr(C.eviocgbit(0, C.EV_MAX)),
-			uintptr(unsafe.Pointer(&bits[0])),
-		)
-		syscall.Close(fd)
-		if testBit(C.EV_REP, bits) {
-			KeyboardPath = name
-			break
-		}
+		KeyboardPath = name
+		break
 	}
 	if KeyboardPath == "" {
 		panic("no keyboard")
 	}
-	pt("%s\n", KeyboardPath)
+	pt("selected %s\n", KeyboardPath)
 
 	keyboardFD, err := syscall.Open(KeyboardPath, syscall.O_RDONLY, 0644)
 	if err != nil {
@@ -99,8 +47,32 @@ func main() {
 	}
 	defer syscall.Close(keyboardFD)
 
-	uinputFD := C.setup_uinput(C.int(keyboardFD))
-	defer C.close_uinput(uinputFD)
+	file, err := os.OpenFile(
+		"/dev/uinput",
+		os.O_WRONLY|syscall.O_NONBLOCK,
+		0,
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	fd := int(file.Fd())
+	ctl(fd, C.UI_SET_EVBIT, C.EV_KEY)
+	for key := uintptr(C.KEY_RESERVED); key <= C.KEY_MAX; key++ {
+		ctl(fd, C.UI_SET_KEYBIT, key)
+	}
+	var setup C.struct_uinput_setup
+	setup.id.bustype = C.BUS_USB
+	setup.id.vendor = 0xdead
+	setup.id.product = 0xbeef
+	setup.name[0] = 'f'
+	setup.name[1] = 'o'
+	setup.name[2] = 'o'
+	ctl(fd, C.UI_DEV_SETUP, uintptr(unsafe.Pointer(&setup)))
+	ctl(fd, C.UI_DEV_CREATE, 0)
+	time.Sleep(time.Second)
+	defer ctl(fd, C.UI_DEV_DESTROY, 0)
 
 	writeEv := func(raw []byte) {
 
@@ -110,7 +82,7 @@ func main() {
 			return
 		}
 
-		if _, err := syscall.Write(int(uinputFD), raw); err != nil {
+		if _, err := syscall.Write(fd, raw); err != nil {
 			panic(err)
 		}
 	}
@@ -398,8 +370,4 @@ func ctl(fd int, a1, a2 uintptr) {
 	if errno != 0 {
 		panic(errno.Error())
 	}
-}
-
-func testBit(n uint, bits []byte) bool {
-	return bits[n/8]&(1<<(n%8)) > 1
 }
