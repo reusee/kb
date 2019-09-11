@@ -2,6 +2,11 @@ package main
 
 /*
 #include <linux/uinput.h>
+
+int eviocgbit0 = EVIOCGBIT(0, EV_MAX);
+
+int eviocgbit_key = EVIOCGBIT(EV_KEY, KEY_MAX);
+
 */
 import "C"
 
@@ -11,30 +16,69 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/reusee/e/v2"
 )
 
 var (
-	pt = fmt.Printf
+	pt     = fmt.Printf
+	me     = e.Default
+	ce, he = e.New(me)
 )
 
 func main() {
 
 	var KeyboardPath string
-	names, err := filepath.Glob("/dev/input/by-id/*")
-	if err != nil {
-		panic(err)
-	}
+	names, err := filepath.Glob("/dev/input/event*")
+	ce(err)
 	for _, name := range names {
-		if !strings.HasSuffix(name, "event-kbd") ||
-			strings.Contains(name, "-if") {
-			continue
+		func() {
+			f, err := os.Open(name)
+			ce(err)
+			defer f.Close()
+			fd := int(f.Fd())
+
+			// 选择键盘
+			evs := make([]byte, C.EV_MAX)
+			if err := ctl2(fd, uintptr(C.eviocgbit0), uintptr(unsafe.Pointer(&evs[0]))); err != nil {
+				return
+			}
+			if evs[C.EV_SYN/8]&(1<<(C.EV_SYN%8)) == 0 {
+				return
+			}
+			if evs[C.EV_KEY/8]&(1<<(C.EV_KEY%8)) == 0 {
+				return
+			}
+			if evs[C.EV_LED/8]&(1<<(C.EV_LED%8)) == 0 {
+				return
+			}
+			if evs[C.EV_REP/8]&(1<<(C.EV_REP%8)) == 0 {
+				return
+			}
+			keys := make([]byte, C.KEY_MAX)
+			if err := ctl2(fd, uintptr(C.eviocgbit_key), uintptr(unsafe.Pointer(&keys[0]))); err != nil {
+				return
+			}
+			ok := false
+			for i := 128; i < 200; i++ {
+				if keys[i/8]&(1<<(i%8)) > 0 {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				return
+			}
+
+			KeyboardPath = name
+		}()
+
+		if KeyboardPath != "" {
+			break
 		}
-		KeyboardPath = name
-		break
 	}
 	if KeyboardPath == "" {
 		panic("no keyboard")
@@ -370,4 +414,17 @@ func ctl(fd int, a1, a2 uintptr) {
 	if errno != 0 {
 		panic(errno.Error())
 	}
+}
+
+func ctl2(fd int, a1, a2 uintptr) error {
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_IOCTL,
+		uintptr(fd),
+		a1,
+		a2,
+	)
+	if errno != 0 {
+		return errno
+	}
+	return nil
 }
