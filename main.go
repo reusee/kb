@@ -11,7 +11,10 @@ int eviocgbit_key = EVIOCGBIT(EV_KEY, KEY_MAX);
 import "C"
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"os"
 	"os/signal"
@@ -31,55 +34,28 @@ var (
 
 func main() {
 
-	var KeyboardPath string
-	names, err := filepath.Glob("/dev/input/event*")
-	ce(err)
-	for _, name := range names {
-		func() {
-			f, err := os.Open(name)
-			ce(err)
-			defer f.Close()
-			fd := int(f.Fd())
+	configFilePath := "/etc/kb.conf"
 
-			// 选择键盘
-			evs := make([]byte, C.EV_MAX)
-			if err := ctl2(fd, uintptr(C.eviocgbit0), uintptr(unsafe.Pointer(&evs[0]))); err != nil {
-				return
-			}
-			if evs[C.EV_SYN/8]&(1<<(C.EV_SYN%8)) == 0 {
-				return
-			}
-			if evs[C.EV_KEY/8]&(1<<(C.EV_KEY%8)) == 0 {
-				return
-			}
-			if evs[C.EV_LED/8]&(1<<(C.EV_LED%8)) == 0 {
-				return
-			}
-			if evs[C.EV_REP/8]&(1<<(C.EV_REP%8)) == 0 {
-				return
-			}
-			keys := make([]byte, C.KEY_MAX)
-			if err := ctl2(fd, uintptr(C.eviocgbit_key), uintptr(unsafe.Pointer(&keys[0]))); err != nil {
-				return
-			}
-			ok := false
-			for i := 128; i < 200; i++ {
-				if keys[i/8]&(1<<(i%8)) > 0 {
-					ok = true
-					break
-				}
-			}
-			if !ok {
-				return
-			}
-
-			KeyboardPath = name
-		}()
-
-		if KeyboardPath != "" {
-			break
-		}
+	var paths []string
+	configContent, err := ioutil.ReadFile(configFilePath)
+	if os.IsNotExist(err) {
+		// init
+		paths, err = filepath.Glob("/dev/input/by-id/*")
+		ce(err)
+		configContent, err = json.Marshal(paths)
+		ce(err)
+		buf := new(bytes.Buffer)
+		ce(json.Indent(buf, configContent, "", "    "))
+		configContent = buf.Bytes()
+		pt("%s\n", configContent)
+		ce(ioutil.WriteFile(configFilePath, configContent, 0644))
+		pt("init\n")
+		return
+	} else {
+		ce(json.Unmarshal(configContent, &paths))
 	}
+
+	KeyboardPath := paths[0]
 	if KeyboardPath == "" {
 		panic("no keyboard")
 	}
