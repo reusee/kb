@@ -1,0 +1,10 @@
+[Unit]
+Description=keyboard
+
+[Service]
+Type=simple
+ExecStart=/home/reus/bin/kb
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
