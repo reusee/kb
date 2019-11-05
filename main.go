@@ -274,6 +274,7 @@ func main() {
 		}()
 
 		timer := time.NewTimer(tickDuration)
+		timerOK := false
 
 		for {
 			select {
@@ -325,7 +326,7 @@ func main() {
 					delayed = delayed[0:0:cap(delayed)]
 					writeEv(ev.raw)
 				}
-				if len(states) > 0 || len(delayed) > 0 {
+				if (len(states) > 0 || len(delayed) > 0) && !timerOK  {
 					if !timer.Stop() {
 						select{
 						case <-timer.C:
@@ -333,6 +334,7 @@ func main() {
 						}
 					}
 					timer.Reset(tickDuration)
+					timerOK = true
 				}
 
 			case <-timer.C:
@@ -362,6 +364,7 @@ func main() {
 					}
 					delayed = delayed[0:0:cap(delayed)]
 				}
+				timerOK = false
 
 			}
 		}
