@@ -273,11 +273,9 @@ func main() {
 			}
 		}()
 
-		ticker := time.NewTicker(tickDuration)
+		timer := time.NewTimer(tickDuration)
 
 		for {
-			//pt("STATES: %+v\n", states)
-			//pt("DELAYED: %+v\n", delayed)
 			select {
 
 			case ev := <-evCh:
@@ -327,13 +325,17 @@ func main() {
 					delayed = delayed[0:0:cap(delayed)]
 					writeEv(ev.raw)
 				}
-
-			case <-func() <-chan time.Time {
 				if len(states) > 0 || len(delayed) > 0 {
-					return ticker.C
+					if !timer.Stop() {
+						select{
+						case <-timer.C:
+						default:
+						}
+					}
+					timer.Reset(tickDuration)
 				}
-				return nil
-			}():
+
+			case <-timer.C:
 				hasFullMatch := false
 				for i := 0; i < len(states); {
 					state := states[i]
