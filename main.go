@@ -326,9 +326,9 @@ func main() {
 					delayed = delayed[0:0:cap(delayed)]
 					writeEv(ev.raw)
 				}
-				if (len(states) > 0 || len(delayed) > 0) && !timerOK  {
+				if (len(states) > 0 || len(delayed) > 0) && !timerOK {
 					if !timer.Stop() {
-						select{
+						select {
 						case <-timer.C:
 						default:
 						}
